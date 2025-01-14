@@ -3,21 +3,68 @@
 @tailwind utilities;
 
 :root {
+  /* Light mode colors */
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #242424;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-dark: #1d4ed8;
+  --surface: #f8fafc;
+  --surface-mixed: #f1f5f9;
+  --border: #e2e8f0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* Dark mode colors */
+    --background: #0f172a;
+    --foreground: #f8fafc;
+    --muted: #94a3b8;
+    --accent: #3b82f6;
+    --accent-dark: #2563eb;
+    --surface: #1e293b;
+    --surface-mixed: #334155;
+    --border: #475569;
   }
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+@layer components {
+  /* Typography utilities */
+  .prose-custom {
+    @apply prose
+           prose-headings:font-semibold 
+           prose-headings:text-foreground 
+           prose-p:[color:var(--foreground)]
+           prose-strong:text-foreground
+           prose-ul:[color:var(--foreground)]
+           prose-ol:[color:var(--foreground)]
+           prose-blockquote:[color:var(--foreground)]
+           prose-blockquote:border-l-accent
+           prose-a:text-accent 
+           hover:prose-a:text-accent-dark;
+  }
+
+  /* Surface styles */
+  .surface-primary {
+    @apply bg-surface border border-border rounded-lg shadow-sm;
+  }
+
+  .surface-secondary {
+    @apply bg-surface-mixed border border-border rounded-lg;
+  }
+
+  /* Code block styling */
+  .code-block {
+    @apply bg-surface-mixed rounded-lg p-4 my-4 overflow-x-auto;
+  }
 }
 
 @layer utilities {
