@@ -21,7 +21,8 @@
     "rehype-raw": "6.1.1",
     "remark-gfm": "3.0.1",
     "unified": "10.1.2",
-    "youtube-transcript": "1.0.6"
+    "youtube-transcript": "1.0.6",
+    "geist": "^1.2.0"
   },
   "devDependencies": {
     "@types/node": "20.10.6",
