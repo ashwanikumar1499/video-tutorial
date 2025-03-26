@@ -1,9 +1,17 @@
 import { getTranscript } from "youtube-transcript";
+import { track } from "@vercel/analytics";
 
 interface VideoDetails {
   title: string;
   description: string;
   transcript: string;
+}
+
+interface TutorialSection {
+  title: string;
+  content: string;
+  completed: boolean;
+  subsections?: string[];
 }
 
 export async function getVideoId(url: string): Promise<string> {
@@ -54,19 +62,17 @@ export function extractGithubLinks(description: string): string[] {
   return description.match(githubRegex) || [];
 }
 
-// Step 4: Generate tutorial using LLM
-export async function generateTutorial(
+// Add this function to split prompt into sections
+function createSectionPrompt(
   videoDetails: VideoDetails,
-  githubLinks: string[]
-): Promise<string> {
-  const geminiApiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-  if (!geminiApiKey) {
-    throw new Error("Gemini API key is not configured");
-  }
+  githubLinks: string[],
+  section: TutorialSection,
+  previousContent?: string
+): string {
+  const isImplementationSection = section.title === "Implementation Guide";
 
-  const prompt = `
-    You are a professional technical writer creating a high-quality Medium blog post. 
-    Create a comprehensive, visually engaging tutorial that explains concepts thoroughly with diagrams, code examples, and clear explanations.
+  return `
+    Generate an extremely detailed technical tutorial section.
     
     VIDEO DETAILS:
     Title: ${videoDetails.title}
@@ -78,146 +84,328 @@ export async function generateTutorial(
         : ""
     }
 
-    Create a tutorial following these specific requirements:
-
-    1. Title and Introduction:
-       - Create a catchy, SEO-friendly title
-       - Write a compelling subtitle
-       - Add a cover image or diagram representing the concept
-       - Include estimated reading time and difficulty level
-       - Start with a real-world problem statement
-       - Explain what readers will build/learn
-       
-    2. Prerequisites and Setup:
-       - List required tools with exact versions
-       - Include environment setup commands
-       - Show directory structure
-       - Provide quick setup script if applicable
-       
-    3. Concept Visualization:
-       Create Mermaid diagrams for:
-       - Architecture overview
-       - Data flow
-       - Component relationships
-       - Step-by-step process flow
-       Example Mermaid diagram:
-       \`\`\`mermaid
-       graph TD
-         A[Start] --> B{Process}
-         B --> C[Result]
-       \`\`\`
-
-    4. Step-by-Step Implementation:
-       For each major step:
-       - Clear step title and objective
-       - Concept explanation with diagrams
-       - Complete code snippet with filename
-       - Line-by-line code explanation
-       - Expected output or result
-       - Common errors and solutions
-       - Testing instructions
-       
-    5. Code Snippets Format:
-       \`\`\`language:filename.ext
-       // Purpose: Brief description
-       // Dependencies: List any dependencies
-       
-       // Step 1: Description
-       code here...
-       
-       // Step 2: Description
-       code here...
-       
-       // Expected Output:
-       // output here...
-       \`\`\`
-       
-    6. Visual Learning Aids:
-       - Add screenshots for UI elements
-       - Include console output examples
-       - Show before/after comparisons
-       - Add warning and info boxes
-       - Use emojis for visual breaks
-       
-    7. Best Practices and Tips:
-       - Industry standard approaches
-       - Performance optimization tips
-       - Security considerations
-       - Debugging strategies
-       - Common pitfalls to avoid
-       
-    8. Interactive Elements:
-       - Add checkboxes for progress tracking
-       - Include expandable sections for details
-       - Provide troubleshooting decision trees
-       - Add copy-to-clipboard code blocks
-       
-    9. Conclusion and Next Steps:
-       - Summarize key learnings
-       - Suggest advanced topics
-       - Provide resource links
-       - Include practice exercises
-       - Add call to action
-
-    Markdown Formatting:
-    1. Use proper heading hierarchy (#, ##, ###)
-    2. Format code blocks with language and filename
-    3. Use blockquotes for important notes
-    4. Include horizontal rules for sections
-    5. Use bold and italic for emphasis
-    6. Create tables for comparing options
-    7. Use numbered lists for steps
-    8. Add anchors for table of contents
-
-    Special Instructions:
-    1. Include at least one diagram per major concept
-    2. Provide complete, working code examples
-    3. Add inline comments in code
-    4. Include error handling
-    5. Show expected output
-    6. Add testing instructions
-    7. Include performance tips
-    8. Reference GitHub code when available
-
-    Format everything in proper Markdown with clear section breaks and visual hierarchy.
-    Focus on making complex concepts easy to understand through examples and visualizations.
-    Ensure all code snippets are complete and functional.
-  `;
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${geminiApiKey}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0,
-          topK: 40,
-          topP: 0.8,
-          maxOutputTokens: 4096,
-        },
-      }),
+    ${
+      isImplementationSection
+        ? `This is the main implementation section. Cover ALL code changes and steps shown in the video.
+           Break down the implementation into these subsections:
+           ${section.subsections?.join("\n")}
+           
+           For each file change:
+           - Show the complete file path
+           - Explain what changes are being made and why
+           - Include the relevant code snippets
+           - Add any necessary configuration`
+        : `Current section to generate: ${section.title}`
     }
-  );
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(
-      `Gemini API Error: ${errorData.error?.message || "Unknown error"}`
+    ${
+      previousContent
+        ? "\nPrevious content summary:\n" + previousContent.slice(-500)
+        : ""
+    }
+
+    CRITICAL REQUIREMENTS:
+    1. Document EVERY detail from the video for this section
+    2. Include ALL terminal commands and their output
+    3. Show ALL file changes with complete paths
+    4. Explain EVERY step thoroughly
+    5. Add relevant diagrams and visual aids
+
+    FORMAT REQUIREMENTS:
+    1. Use clean Markdown with proper hierarchy
+    2. Format code blocks with language and filename:
+       \`\`\`language:path/to/file
+       code here
+       \`\`\`
+    3. Use blockquotes for important notes
+    4. Add warning boxes for common pitfalls
+
+    Note: This section MUST be generated with complete details.
+    Do not return SKIP_SECTION - if there's relevant content in the video, include it.
+    If certain aspects aren't shown in the video, use standard best practices to fill in the gaps.
+  `;
+}
+
+// Modify the main generation function
+export async function generateTutorial(
+  videoDetails: VideoDetails,
+  githubLinks: string[]
+): Promise<string> {
+  const geminiApiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+  if (!geminiApiKey) {
+    throw new Error("Gemini API key is not configured");
+  }
+
+  // Dynamic section determination based on content type
+  const sections: TutorialSection[] = [
+    {
+      title: "Introduction and Project Overview",
+      content: "",
+      completed: false,
+    },
+    {
+      title: "Setup and Installation",
+      content: "",
+      completed: false,
+    },
+    {
+      title: "Implementation Guide",
+      content: "",
+      completed: false,
+      subsections: [
+        "File Structure and Configuration",
+        "Core Implementation Steps",
+        "Code Changes and Explanations",
+      ],
+    },
+    {
+      title: "Testing and Troubleshooting",
+      content: "",
+      completed: false,
+    },
+  ];
+
+  let fullTutorial = "";
+  const totalSections = sections.length;
+  const completedSections: TutorialSection[] = [];
+
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    // Update progress calculation to be more granular
+    // Each section accounts for ~90% of progress, reserving 10% for final processing
+    const sectionProgress = Math.round((i / sections.length) * 90);
+
+    // Emit "starting section" progress
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("tutorialProgress", {
+          detail: {
+            section: `Starting ${section.title}...`,
+            progress: sectionProgress,
+          },
+        })
+      );
+    }
+
+    const sectionPrompt = createSectionPrompt(
+      videoDetails,
+      githubLinks,
+      section,
+      fullTutorial
+    );
+
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: sectionPrompt }],
+            },
+          ],
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_ONLY_HIGH",
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_ONLY_HIGH",
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            topK: 40,
+            topP: 0.8,
+            maxOutputTokens: 4096,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Gemini API Error:", errorData);
+
+      // Track API errors
+      track("gemini_api_error", {
+        error: errorData.error?.message || JSON.stringify(errorData),
+      });
+
+      throw new Error(
+        `Gemini API Error: ${
+          errorData.error?.message || JSON.stringify(errorData)
+        }`
+      );
+    }
+
+    const data = await response.json();
+    const content = data.candidates[0].content.parts[0].text;
+
+    // Always include the content if it's the implementation section
+    if (
+      section.title === "Implementation Guide" ||
+      content.trim().length > 100
+    ) {
+      section.completed = true;
+      completedSections.push(section);
+
+      if (completedSections.length === 1) {
+        fullTutorial = `# ${videoDetails.title}\n\n${content}`;
+      } else {
+        fullTutorial += `\n\n## ${section.title}\n\n${content}`;
+      }
+    }
+
+    // After API response, update progress to show section completion
+    const completedSectionProgress = Math.round(
+      ((i + 0.9) / sections.length) * 90
+    );
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("tutorialProgress", {
+          detail: {
+            section: `Completed ${section.title}`,
+            progress: completedSectionProgress,
+          },
+        })
+      );
+    }
+  }
+
+  // If no sections were generated, create a comprehensive single tutorial
+  if (completedSections.length === 0) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("tutorialProgress", {
+          detail: {
+            section: "Generating comprehensive tutorial...",
+            progress: 90,
+          },
+        })
+      );
+    }
+
+    const fallbackPrompt = `
+      Create an extremely detailed, step-by-step tutorial that covers EVERYTHING shown in the video.
+      
+      Required Sections:
+      1. Project Overview
+         - Goals and objectives
+         - Final result preview
+         - Technical requirements
+
+      2. Complete Setup Guide
+         - Development environment
+         - Required tools and versions
+         - Configuration files
+         - Environment variables
+
+      3. Implementation Details
+         - Every file change with explanations
+         - All terminal commands
+         - Configuration updates
+         - Step-by-step instructions
+
+      4. Code Documentation
+         - Full file paths
+         - Before/after code changes
+         - Inline explanations
+         - Best practices
+
+      5. Visual Explanations
+         - Workflow diagrams
+         - Project structure
+         - Process flows
+         - Data flow diagrams
+
+      6. Testing and Validation
+         - Test procedures
+         - Expected results
+         - Error handling
+         - Debugging tips
+
+      7. Troubleshooting Guide
+         - Common issues
+         - Solutions
+         - Prevention tips
+
+      Format everything in clean Markdown with proper code blocks, diagrams, and visual hierarchy.
+      Don't skip any detail shown in the video.
+
+      VIDEO DETAILS:
+      Title: ${videoDetails.title}
+      Description: ${videoDetails.description}
+      Transcript: ${videoDetails.transcript}
+      ${
+        githubLinks.length > 0
+          ? `\nGitHub Repositories: ${githubLinks.join("\n")}`
+          : ""
+      }
+    `;
+
+    const fallbackResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: fallbackPrompt }],
+            },
+          ],
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_ONLY_HIGH",
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_ONLY_HIGH",
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 4096,
+          },
+        }),
+      }
+    );
+
+    const fallbackData = await fallbackResponse.json();
+    fullTutorial = `# ${videoDetails.title}\n\n${fallbackData.candidates[0].content.parts[0].text}`;
+
+    // Final progress update
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("tutorialProgress", {
+          detail: {
+            section: "Finalizing...",
+            progress: 95,
+          },
+        })
+      );
+    }
+  }
+
+  // Final update to 100% only when actually returning
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent("tutorialProgress", {
+        detail: {
+          section: "Complete!",
+          progress: 100,
+        },
+      })
     );
   }
 
-  const data = await response.json();
-  return data.candidates[0].content.parts[0].text;
+  return fullTutorial;
 }

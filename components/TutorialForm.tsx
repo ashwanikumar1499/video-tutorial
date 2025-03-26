@@ -16,6 +16,7 @@ import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import mermaid from "mermaid";
 import type { ReactMarkdownOptions } from "react-markdown/lib/react-markdown";
 import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
+import { track } from "@vercel/analytics";
 
 // Initialize mermaid
 if (typeof window !== "undefined") {
@@ -33,11 +34,22 @@ const codeStyle: SyntaxHighlighterProps["customStyle"] = {
   padding: "1em",
 };
 
+interface GenerationStatus {
+  currentSection: string;
+  progress: number;
+}
+
 export default function TutorialForm() {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(
+    "https://youtu.be/UXDSeD9mN-k?si=axCSoEdA3tSxdIef"
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tutorial, setTutorial] = useState("");
+  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>({
+    currentSection: "",
+    progress: 0,
+  });
 
   useEffect(() => {
     if (tutorial) {
@@ -49,22 +61,59 @@ export default function TutorialForm() {
     }
   }, [tutorial]);
 
+  useEffect(() => {
+    const handleProgress = (
+      event: CustomEvent<{ section: string; progress: number }>
+    ) => {
+      setGenerationStatus({
+        currentSection: event.detail.section,
+        progress: event.detail.progress,
+      });
+    };
+
+    window.addEventListener(
+      "tutorialProgress",
+      handleProgress as EventListener
+    );
+    return () => {
+      window.removeEventListener(
+        "tutorialProgress",
+        handleProgress as EventListener
+      );
+    };
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setGenerationStatus({ currentSection: "Introduction", progress: 0 });
 
     try {
       const videoId = await getVideoId(url);
       const videoDetails = await fetchVideoDetails(videoId);
       const githubLinks = extractGithubLinks(videoDetails.description);
+
       const generatedTutorial = await generateTutorial(
         videoDetails,
         githubLinks
       );
+
       setTutorial(generatedTutorial);
+
+      // Track successful tutorial generation
+      track("tutorial_generated", {
+        videoId,
+        title: videoDetails.title,
+        hasGithubLinks: githubLinks.length > 0,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred");
+
+      // Track errors
+      track("tutorial_error", {
+        error: err instanceof Error ? err.message : "Unknown error",
+      });
     } finally {
       setLoading(false);
     }
@@ -132,6 +181,10 @@ export default function TutorialForm() {
 
   return (
     <div className="space-y-8">
+      <div className="text-sm text-muted text-center mb-2">
+        We've preloaded an example video. Click "Generate Tutorial" to see it in
+        action, or paste your own YouTube URL below.
+      </div>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <input
@@ -182,10 +235,35 @@ export default function TutorialForm() {
         </button>
       </form>
 
+      {loading && (
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm text-muted">
+            <span>{generationStatus.currentSection}</span>
+            <span>{generationStatus.progress}%</span>
+          </div>
+          <div className="w-full bg-surface-mixed rounded-full h-2 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ease-out ${
+                generationStatus.progress === 100 ? "bg-green-500" : "bg-accent"
+              }`}
+              style={{
+                width: `${generationStatus.progress}%`,
+                transition: "width 0.5s ease-out",
+              }}
+            />
+          </div>
+          {generationStatus.progress === 100 && !tutorial && (
+            <p className="text-sm text-muted text-center">
+              Almost there! Formatting your tutorial...
+            </p>
+          )}
+        </div>
+      )}
+
       {error && (
         <div
-          className="p-4 bg-red-50/50 dark:bg-red-900/20 border border-red-200 
-                      dark:border-red-800 text-red-600 dark:text-red-400 rounded-lg"
+          className="p-4 bg-red-100 dark:bg-red-900/40 border border-red-300 
+                      dark:border-red-700 text-red-800 dark:text-red-300 rounded-lg font-medium"
         >
           {error}
         </div>

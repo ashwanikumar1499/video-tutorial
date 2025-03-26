@@ -10,17 +10,18 @@
   },
   "dependencies": {
     "@tailwindcss/typography": "0.5.10",
+    "@vercel/analytics": "^1.5.0",
+    "mermaid": "10.6.1",
     "next": "14.0.4",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-markdown": "8.0.7",
     "react-syntax-highlighter": "15.5.0",
-    "youtube-transcript": "1.0.6",
-    "mermaid": "10.6.1",
-    "remark-gfm": "3.0.1",
-    "rehype-raw": "6.1.1",
     "rehype-highlight": "6.0.0",
-    "unified": "10.1.2"
+    "rehype-raw": "6.1.1",
+    "remark-gfm": "3.0.1",
+    "unified": "10.1.2",
+    "youtube-transcript": "1.0.6"
   },
   "devDependencies": {
     "@types/node": "20.10.6",
